@@ -25,6 +25,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.oxm.jaxb.Jaxb2Marshaller;
 
 @Configuration
@@ -57,6 +59,13 @@ public class BatchConfiguration {
     }
 
     @Bean
+    public TaskExecutor taskExecutor() {
+        SimpleAsyncTaskExecutor taskExecutor = new SimpleAsyncTaskExecutor();
+        taskExecutor.setConcurrencyLimit(10);
+        return taskExecutor;
+    }
+
+    @Bean
     public JdbcBatchItemWriter<Person> writer(DataSource dataSource) {
         return new JdbcBatchItemWriterBuilder<Person>()
                 .itemSqlParameterSourceProvider(new BeanPropertyItemSqlParameterSourceProvider<>())
@@ -80,12 +89,13 @@ public class BatchConfiguration {
 
     // tag::jobstep[]
     @Bean
-    public Job importUserJob(JobCompletionNotificationListener listener, Step step1, Step step2) {
+    public Job importUserJob(JobCompletionNotificationListener listener, Step step1, Step step2, Step step3) {
         return jobBuilderFactory.get("importUserJob")
                 .incrementer(new RunIdIncrementer())
                 .listener(listener)
                 .flow(step1)
                 .next(step2)
+                .next(step3)
                 .end()
                 .build();
     }
@@ -93,23 +103,32 @@ public class BatchConfiguration {
     @Bean
     public Step step1(JdbcBatchItemWriter<Person> writer) {
         return stepBuilderFactory.get("step1")
-                .<Person, Person> chunk(10)
+                .<Person, Person> chunk(5)
                 .reader(reader())
                 .processor(processor())
-                .writer(writer)
+                .writer(writer).taskExecutor(taskExecutor())
                 .build();
     }
     // end::jobstep[]
 
 
     @Bean
-    public Step step2(FlatFileItemWriter<Person> writer2, ItemWriter<Person> databaseXmlItemWriter) {
+    public Step step2(FlatFileItemWriter<Person> writer2) {
         return stepBuilderFactory.get("step2")
-                .<Person, Person> chunk(10)
+                .<Person, Person> chunk(5)
                 .reader(reader())
                 .processor(processor())
-                .writer(writer2)
-                .writer(databaseXmlItemWriter)
+                .writer(writer2).taskExecutor(taskExecutor())
+                .build();
+    }
+
+    @Bean
+    public Step step3(ItemWriter<Person> databaseXmlItemWriter) {
+        return stepBuilderFactory.get("step3")
+                .<Person, Person> chunk(5)
+                .reader(reader())
+                .processor(processor())
+                .writer(databaseXmlItemWriter).taskExecutor(taskExecutor())
                 .build();
     }
 
